@@ -1,6 +1,13 @@
 
-Changes for X-Search.pl Version 1.04.
+Changes for X-Search.pl Version 1.06.
 
+
+Version 1.06
+
+ - Added a admin qid directory maintenance function so users can
+   delete unwanted qid directories or simply list what qid directories
+   have been created. Minor misc. Admin functions tweaking especially
+   under win32.
 
 Version 1.04
 

@@ -1,5 +1,5 @@
 
-X-Search.pl Version 1.04.
+X-Search.pl Version 1.06.
 
 
 I<X-Search> reads a series of search commands from a plain text
@@ -20,7 +20,7 @@ I<X-Search> stores the url's from search results to a data file enabling
 it to track what it already has seen. This insures subsequent searches are
 unique and allows one to copy additional undesirable urls in blocks to this
 file to prevent X-Search from recording them if they are ever encountered 
-in a future search. 
+in a future search (Filtering). 
 
 I<X-Search> is ideal for maintaining records of frequent news events and
 can safely be run as many times as desired daily to determine new news
@@ -34,7 +34,8 @@ this: |groups=*perl*|
 I<X-Search> is ideal for web sites to present to their users detailed dated
 summaries of specific topics around the web that can change frequently. Thus,
 users are presented with the most current new additions as found in a pretty
-informative chronological order.
+informative chronological order that relates to some subject matter. X-Search
+makes an ideal research tool for tracking and indexing latest additions.
 
 I<X-Search> Allows the option of verifying the url address to determine if
 it is valid or not. Any url's that are found not valid, i.e., moved, not
@@ -43,7 +44,7 @@ found, are ignored.
 I<X-Search> allows one with a lot of flexibility to use in all sorts of
 neat applications.
 
-(SEE =head1 REMOTE ADMINSTRATION for remote opertaion via web browser)
+(SEE =head1 REMOTE ADMINSTRATION for remote opertaion via a web browser)
 
 
 

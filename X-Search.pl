@@ -1,16 +1,16 @@
 #!/usr/bin/perl
 $| = 1;
 # X-Search.pl
-# $Id: X-Search.PL,v 1.04 2000/06/12 04:45:16 jims Exp $
+# $Id: X-Search.PL,v 1.06 2000/06/14 18:22:57 jims Exp $
 # (c) Copyright 2000 by Jim Smyser All Rights Reserved
 
-
 ## DEFINE USER SETTINGS
-# Details can be found in the doc's at end of this script or man page
+# see USER SETTINGS in POD Doc's at end of script or man page for details
 
 $verbose = "1"; # print messages to screen 1=yes print messages 0=No
 $ck_url = "0"; # verify if urls are good or not
-$iDIR = "/home/httpd/html/index"; # directory name to store index.html & write qid's under.   
+$iDIR = "c:/server/root/xsearch"; # full path/name of dir to store index.html & write qid's under.   
+$index_url = ""; # (optional) print index.html url address in admin mode
 $print_summaries = "1"; # 1= print summaries 0= no summaries
 $oURLS = "urls.dat"; # our seen urls file
 $qconfig = "query.ini"; # default configuration file name & location 
@@ -28,7 +28,7 @@ if (defined($ARGV[0])) {
 $qconfig = $ARGV[0];
 }
 
-$VERSION = '1.04';
+$VERSION = '1.06';
 use WWW::Search;
 use LWP::Simple;
 use POSIX qw(strftime);
@@ -43,7 +43,8 @@ print "Content-Type: text/html\n\n";
 &read_config_file if ($FORM{'config_file'} eq "1");
 &write_config_file if ($FORM{'write_config'} eq "1");
 &print_admin if ($FORM{'admin'} eq "show");
-
+&list_qids if ($FORM{'list_dirs'} eq "1");
+&delete_select if ($FORM{'delete'} eq "select");
 # end cgi stuff             
 
 
@@ -85,14 +86,8 @@ $ftime = &time_now;
 print "Script Finished at $ftime\n" if ($verbose);
 
 print <<INFO if ($verbose);
-Index.html location is $iDIR. URL: <a href=/index/>Index.html</a>
-NOTE: This url link may or may not be accurate depending upon where the
-index.html page is written. It assumes the index.html page will be found
-in a directory named "index" off your root directory. You should manually
-enter the address to where the index.html page is found on your system and
-bookmark it for future reference.
+Index.html location is $iDIR. URL: <a href=$index_url>Index.html</a>
 INFO
-
 
 exit 0;
 
@@ -234,8 +229,9 @@ open(URLS, ">>$oURLS");
     $iHTML .= " <a href=\"$url\">$title</a><br>\n" if ($url ne '');
     }
     $iHTML = "No Summary for Most Recent Search\n" if (!$iHTML);
-    &check_date_file; 
     $query_options = ''; 
+    &check_date_file; 
+
 } # end do_search
 
 
@@ -261,7 +257,7 @@ sub check_date_file {
   # that we are tracking over time
   print "No new results for: $search_name\n" if (!$dHTML && $verbose);
 
-  return if (!$dHTML);
+  goto DONE if (!$dHTML);
   print "Writing results for: $search_name\n" if ($verbose);
   my($file) = (&file_time_stamp).'.html';
   if (open (DATE,'<'."$iDIR/$qid/$file") ) { 
@@ -280,7 +276,6 @@ sub check_date_file {
       print HTML "$dHTML"; # print new html: newest search results on top
       print HTML print_footer($footer); # print a new footer
       close (HTML);
-      $dHTML = '';
       goto DONE;
       }
 
@@ -304,18 +299,25 @@ sub check_date_file {
       print HTML "$cHTML"; # print the current html links back
       print HTML print_footer($footer); # print a new footer
       close (HTML);
-      $cHTML = '';
-      $dHTML = '';
+      goto DONE;
     } else {
     # create one
       open (HTML,'>'."$iDIR/$qid/$file") || die "Can't open $file. Reason: $!\n";
       print HTML print_dhead($dhead);
       print HTML "$dHTML"; # print new html: newest search results append
       print HTML print_footer($footer);
-     close(HTML);
-     $dHTML = '';
+      close(HTML);
+      goto DONE;
 }
 DONE:
+      # prepare for next loop
+      $query_options = ''; 
+      $query = '';
+      $options = '';
+      $engine = '';
+      $cHTML = '';
+      $dHTML = '';
+
 }
 
 ############################################
@@ -325,9 +327,24 @@ sub build_date_links {
 # a list of existing file names and etracting the date from the
 # comment tag to build links with and copying saving that data to 
 # my temp file for later. Will only build links for active searches.
-
 $qdir = "$iDIR/$qid/";
-opendir (DIR, $qdir) || die $!;
+
+# hack test incase a user deleted a qid directory and not removed 
+# it from the configuration file!
+ if (opendir (DIR, $qdir)) { 
+     # Looks like it exists
+     closedir (DIR);
+     } else { 
+     # better make one
+     if (mkdir ($qdir, 0755) ) {
+     if ($! =~ m/file exists/i) { # already done
+     die "Can't create directory $qdir.\nReason $!";
+    }
+    }
+    chmod 0755, $qdir || die "Can't chmod directory $qdir.\nReason $!";
+    }
+
+opendir (DIR, $qdir); 
 @datfiles = grep !/^\.\.?$/, readdir(DIR);
 closedir (DIR);
 foreach $dfile (@datfiles) {
@@ -484,12 +501,14 @@ if ($method eq "GET") {
     $FORM{$key} = $value;
     }
     }
+    foreach $key (sort keys %FORM) {
+    $keyword .= $FORM{$key};
+    }
+
     }
 
 ################################################
 sub print_admin {
-
-#print "Content-Type: text/html\n\n";
 
 print <<TOP;
 
@@ -572,13 +591,14 @@ above template below. Modify current search commands or add and remove entire
 command lines. Click "Save Changes" to write the new changes to file. Note: If
 the below text area is blank, this means the configuration file does not yet
 exists and you should add search commands to create one from this form.
-<blockquote>
 
 <form method="POST" action="X-Search.pl">
-<textarea rows=9 name=urltext cols=80>$tdata</textarea>
+<textarea rows="9" name="textlines" cols="80" maxlength="800" wrap="off">$tdata</textarea>
 <input type="hidden" name="write_config" value="1">
 <p><input type="submit" value="Save Changes"></p>
 </form>
+<blockquote>
+
 <hr>
 <p>&nbsp;</p>
 <form method="POST" action="X-Search.pl">
@@ -587,6 +607,15 @@ exists and you should add search commands to create one from this form.
 verbose "on" you will be presented with a page detailing the search results
 as well as a link to the index.html file after the script has stoped running.</p>
 </form>
+<p>
+<form method="POST" action="X-Search.pl">
+<input type="hidden" name="list_dirs" value="1">
+<p><input type="submit" value="List qid Directories">
+&nbsp; Perform directory maintenance by deleting selected unwanted qid directories
+from disk.
+</form>
+
+
 </body>
 </html>
 BOTTOM
@@ -602,8 +631,11 @@ sub read_config_file {
   @config = <FILE>;
   close (FILE);
   foreach $line (@config) {
+  next if ($line =~ m@^$@); # avoid blank lines
   $tdata .= $1 if ($line =~ /^(\w.*)/i);
   $tdata = $tdata . "\n";
+  $tdata =~ s/^\s+$//g; # remove blank lines 
+
   $tdata = '';
   } # dat lines
   } else {
@@ -627,12 +659,12 @@ $query = $FORM{'query'};
 $options = $FORM{'options'};
 $max = $FORM{'max'};
 $qid = $FORM{'qid'};
-$tdata = $FORM{'urltext'};
-
+$tdata = $FORM{'textlines'};
+print "$tdata\n";
 if ($tdata) {
    $tdata =~ s/\015//g; # remove ^M's 
    open(UI, ">$qconfig") || die "Can't open $config_file: $!\n"; 
-   print UI "$tdata\n"; 
+   print UI "$tdata"; 
    close(UI); 
    print "<br><br><center><B>X-Search Configuration file been updated.</b>\n";
 &read_config_file;
@@ -655,6 +687,61 @@ exit;
 
 &read_config_file;
 }
+
+################################################
+sub list_qids {
+
+# list all the sub directories created
+ for $subs ($iDIR) {
+  while (<$subs/*>) { 
+
+   if (-d $_) {
+   $_ = $_ . "\n";
+   push(@dirlist, $_);
+   }
+   }
+  }
+
+print "<h2>Delete Unwanted qid Directories</h2><p>\n";
+print "Check directories to remove and then click <b>Remove Selected</b> to remove.<p>\n";
+print "<form method=\"POST\" action=\"X-Search.pl\">\n";
+print "<input type=\"hidden\" name=\"delete\" value=\"select\">\n";
+
+foreach my $sdir (@dirlist) {
+print "<b><input type=\"checkbox\" name=\"DN\" value=\"#$sdir\">  $sdir<br>\n";
+} # for ea
+
+print <<END;
+<p><input type=\"submit\" value=\"Remove Selected\">
+</form>
+<form method="GET" action="X-Search.pl">
+<input type="hidden" name="admin" value="show">
+<p><input type="submit" value="Back to Admin Page"></p>
+</form>
+END
+exit;
+}
+
+################################################
+sub delete_select {
+
+$keyword =~ s/ //g;
+$keyword =~ s/\s+//g;
+$keyword =~ s/select//g;
+$keyword =~ s/^#//g;
+
+foreach my $subdir (split(/#/, $keyword)) {
+$subdir =~ s/^\W//g;  # for win32 
+$subdir = "/" . $subdir if (not $subdir =~ m/^\//)  && ($iDIR =~ m/^\//); # hack for disapearing ^/ 
+next if $subdir =~ /^\s+$/;
+unlink <$subdir/*.*> or warn "Couldn't delete files in $subdir: $!\n";
+rmdir($subdir) or warn "Couldn't remove $subdir: $!\n";
+
+}
+
+&list_qids;
+}
+
 
 __END__
 
@@ -689,7 +776,7 @@ I<X-Search> stores the url's from search results to a data file enabling
 it to track what it already has seen. This insures subsequent searches are
 unique and allows one to copy additional undesirable urls in blocks to this
 file to prevent X-Search from recording them if they are ever encountered 
-in a future search. 
+in a future search (Filtering). 
 
 I<X-Search> is ideal for maintaining records of frequent news events and
 can safely be run as many times as desired daily to determine new news
@@ -703,7 +790,8 @@ this: |groups=*perl*|
 I<X-Search> is ideal for web sites to present to their users detailed dated
 summaries of specific topics around the web that can change frequently. Thus,
 users are presented with the most current new additions as found in a pretty
-informative chronological order.
+informative chronological order that relates to some subject matter. X-Search
+makes an ideal research tool for tracking and indexing latest additions.
 
 I<X-Search> Allows the option of verifying the url address to determine if
 it is valid or not. Any url's that are found not valid, i.e., moved, not
@@ -712,7 +800,7 @@ found, are ignored.
 I<X-Search> allows one with a lot of flexibility to use in all sorts of
 neat applications.
 
-(SEE =head1 REMOTE ADMINSTRATION for remote opertaion via web browser)
+(SEE =head1 REMOTE ADMINSTRATION for remote opertaion via a web browser)
 
 =head1 CONFIGURATION FILE
 
@@ -736,15 +824,15 @@ setups.
 This file is read to get the following user defined search
 commands:
 
-  1) The search engine to use
-  2) A nice Name to describe the top of the search to
-     printed on the web pages (Like AutoSearch $query_name)
-  3) The query words for the search seperated by a space
+  1) The WWW::Search backend to use for the search 
+  2) A nice Name description for the search topic to be
+     printed within the web pages. This is like a headline. 
+  3) The query search words for the search seperated by a space
   4) Any search options to pass to search engine. This is optional 
      and can be left blank.
   5) Max results to return
   6) The B<qid>, query information directory, the directory name 
-     to create to store dated web pages creadted from the search.
+     to create to store dated web pages created from the search.
 
 A typical configuration file would have one or more lines that
 follow this structure:
@@ -765,7 +853,7 @@ look like:
 HotBot|Military|tank armor|RD=DM&Domain=.mil|40|tanks|
 Google|Tech News|parallel processing||200|parallel| 
 Excite::News|News From Home|Palm Springs California||100|myhome|
-AltaVista|AZ Fishing|arizona lakes||60|lakes|
+AltaVista|AZ Fishing|arizona lakes fishing||60|lakes|
 
 --------end-----------------
 
@@ -777,6 +865,8 @@ called "parallel".
 
 Obiviously, you want to define different qid names for all your different 
 searches so that hot dog searches don't end up mixed with apple searches.
+But, at same time you can merge different searches to one date qid file
+as well. This is up to each user to determine for themselves.
 
 Note About Options
 
@@ -798,9 +888,9 @@ and available on that server. Before uploading X-Search to your server
 you will need to set the path within the X-Search script as to where the
 index directory will be created and this should be the absolute path to
 your root directory. Example on a RedHat system you would enter
-"/home/httpd/html/index" (no trailing "/" slash) or some other directory
-name other than "index" if you prefer. Then you can just use
-http://myaddress.com/index to access your X-Search index.html page.
+"/home/httpd/html/xsearch" (no trailing "/" slash) or some other directory
+name other than "xsearch" if you prefer. Then you can just use
+http://myaddress.com/xsearch to access your index.html page.
 
 You will need to chmod X-Search.pl to 755 as well as the cgi-bin
 directory itself to work properly under Unix once you have uploaded to
@@ -829,6 +919,10 @@ This way you can remotely execute X-Search in a timely manner through
 your browser, say once a week. After the script is completed you can
 then navigate to the URL address of your X-Search index.html to view any
 new search additions.
+
+There is also a qid maintenance button that allows for viewing and 
+removing qid directories. Unused directories undoubtly build up over
+time and this is a good way to remove them from disk.
 
 =head1 AUTO SEARCHING
 
@@ -874,22 +968,31 @@ can slow the search down depending on how many bad urls are encountered.
 
 =item $iDIR
 
-$iDIR = "index";  
+$iDIR = "c:/server/root/html/xsearch";  
 
-Define absolute path/name to store the main index.html file. The name
-"index" should be just fine. B<qid> directories will be created below
-this directory. 
+Full absolute directory path/name to store the main index.html file.
+B<qid> directories will be created below this directory. For manual
+command line operation you can just define this as "./xsearch" to create
+a directory name "xsearch" under where you execute X-Search.pl.
 
 REMOTE SERVER CONSIDERATIONS
 
 Running remotely $iDIR should be pointed to the root directory, for
 example on RedHat you should define the path as:
 
-"/home/httpd/html/index" 
+"/home/httpd/html/xsearch" 
 
 In this way the url address to your index.html page would be
-http://myaddress.com/index/index.html Of course, "index" can be any name
-you desire for the directory.
+http://myaddress.com/xsearch/index.html. Of course, "xsearch" can be any
+name you desire for the directory.
+
+=item $index_url
+
+$index_url = "http://127.0.0.1/xsearch/";
+
+This is optional and used for remote administration to print a link
+to your index.html directory so you have a link to click after
+you have executed X-Search from your browser.
 
 =item $print_summaries
 
@@ -914,9 +1017,9 @@ $qconfig = "query.ini";
 
 Define path and name of the query configuration file. This file stores
 the search command, such as engines to use, search string, qid
-directory, max to return and so forth. SEE bottom of this script for
-more details. You MAY also pass this value as a arugument so you can run
-multi configuration files
+directory, max to return and so forth.  You MAY also pass this value as 
+a arugument so you can run multi configuration files by defining their
+name and path as a commandline argument.
 
 =item $host $port
  
@@ -933,6 +1036,13 @@ This just defines a name for temporary working file X-Search uses to
 build a index.html file. No need to mess with it.
 
 =head1 CHANGES
+
+Version 1.06
+
+ - Added a admin qid directory maintenance function so users can
+   delete unwanted qid directories or simply list what qid directories
+   have been created. Minor misc. Admin functions tweaking especially
+   under win32.
 
 Version 1.04
 
@@ -969,4 +1079,3 @@ the author/developer.
 THIS SOFTWARE IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
 WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
 MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
-
