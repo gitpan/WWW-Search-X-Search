@@ -1,21 +1,19 @@
-#!perl -w
+#!/usr/bin/perl
+$| = 1;
 # X-Search.pl
-# $Id: X-Search.PL,v 1.03 2000/06/04 14:58:54 jims Exp $
+# $Id: X-Search.PL,v 1.04 2000/06/12 04:45:16 jims Exp $
 # (c) Copyright 2000 by Jim Smyser All Rights Reserved
-
-use Cwd;
-my $dir = cwd;
 
 
 ## DEFINE USER SETTINGS
-# Details can be found in the doc's at end of this script or man pages
+# Details can be found in the doc's at end of this script or man page
 
 $verbose = "1"; # print messages to screen 1=yes print messages 0=No
 $ck_url = "0"; # verify if urls are good or not
-$iDIR = "$dir/index"; # directory name to store index.html 
+$iDIR = "/home/httpd/html/index"; # directory name to store index.html & write qid's under.   
 $print_summaries = "1"; # 1= print summaries 0= no summaries
 $oURLS = "urls.dat"; # our seen urls file
-$qconfig = "query.ini"; # the configuration file name & location
+$qconfig = "query.ini"; # default configuration file name & location 
 $port = "";
 $host = "";
 $sTEMP = "TEMP";
@@ -30,19 +28,30 @@ if (defined($ARGV[0])) {
 $qconfig = $ARGV[0];
 }
 
-$VERSION = '1.03';
+$VERSION = '1.04';
 use WWW::Search;
 use LWP::Simple;
 use POSIX qw(strftime);
+use CGI::Carp (fatalsToBrowser); 
 $now = &time_now;
 $today = &date_today;
-             
-&check_files; # make sure we have what we need
 
+
+# check first to see if we have any cgi requests
+&read_cgi_input;
+print "Content-Type: text/html\n\n"; 
+&read_config_file if ($FORM{'config_file'} eq "1");
+&write_config_file if ($FORM{'write_config'} eq "1");
+&print_admin if ($FORM{'admin'} eq "show");
+
+# end cgi stuff             
+
+
+&check_files; # make sure we have what we need
 open(LOG, ">$sTEMP");   # to manage our index summary. Perhaps hash it?
 
-print "Script started at $now\n" if ($verbose);
-&read_config_file;
+print "<pre>\nScript started at $now\n" if ($verbose);
+&read_local_config;
 foreach $qs (@input) {
 ($engine,$search_name,$query,$options,$max,$qid) = split (/\|/, $qs);
 
@@ -74,6 +83,16 @@ $iHTML = '';
 &finish_up;
 $ftime = &time_now;
 print "Script Finished at $ftime\n" if ($verbose);
+
+print <<INFO if ($verbose);
+Index.html location is $iDIR. URL: <a href=/index/>Index.html</a>
+NOTE: This url link may or may not be accurate depending upon where the
+index.html page is written. It assumes the index.html page will be found
+in a directory named "index" off your root directory. You should manually
+enter the address to where the index.html page is found on your system and
+bookmark it for future reference.
+INFO
+
 
 exit 0;
 
@@ -196,6 +215,7 @@ open(URLS, ">>$oURLS");
     # ?'s and +'s can be problematic
     $url =~ s/\?/%3F/g; # gotta escape those '?'s'  
     $url =~ s/\+/%2B/g; # do +'s too  
+    $url =~ s/\$/%24/g; # do $'s to be safe  
     if ($url) {
     foreach $oline (@old) {
     $url = '' if ($oline =~ m/$url/i);
@@ -206,8 +226,9 @@ open(URLS, ">>$oURLS");
     print URLS "$url\n" if ($url ne ''); # record what we have not seen before
     # next line we print to our dateXXXX.html file
     $desc = "(No Description)\n" if (!$desc);
-    $url =~ s/%3F/\?/g; # unescape those '?''s  
+    $url =~ s/%3F/\?/g; # unescape the escaped  
     $url =~ s/%2B/\+/g;    
+    $url =~ s/%24/\$/g;   
     $dHTML .= "<a href=\"$url\">$title</a><br>$desc<p>\n" if ($url ne '');
     # next line we use to print to our main index.html (Summary)
     $iHTML .= " <a href=\"$url\">$title</a><br>\n" if ($url ne '');
@@ -396,7 +417,7 @@ $sHTML = '';
 }
 
 ######################################################
-sub read_config_file {
+sub read_local_config {
 
 open (PATH, "$qconfig") || die 
 "We need a configuration file with defined search commands. No search commands read!. $!";
@@ -436,6 +457,206 @@ sub add_to_hash
     }
   } # add_to_hash
 
+#####################################################
+sub read_cgi_input {
+
+    local ($method, $query, @keypairs, $keyvalue, $key, $value);
+    $method = $ENV{'REQUEST_METHOD'};
+if ($method eq "GET") {
+    $query = $ENV{'QUERY_STRING'};
+    } elsif ($method eq "POST") {
+    read (STDIN, $query, $ENV{'CONTENT_LENGTH'});
+      } 
+      else 
+      {
+    local ($msg) = "Unsupported method: $method\n";
+    }
+    @keypairs = split(/&/,$query);
+    foreach $keyvalue (@keypairs) {
+      ($key,$value) = split(/=/,$keyvalue);
+      $key =~ tr/+/ /;
+      $key =~ s/%([\dA-Fa-f][\dA-Fa-f])/pack("C",hex($1))/eg;
+      $value =~ tr/+/ /;
+      $value =~ s/%([\dA-Fa-f][\dA-Fa-f])/pack("C",hex($1))/eg;
+    if (defined($FORM{$key})) {
+    $FORM{$key} = join("\0",$FORM{$key},$value);
+    } else {
+    $FORM{$key} = $value;
+    }
+    }
+    }
+
+################################################
+sub print_admin {
+
+#print "Content-Type: text/html\n\n";
+
+print <<TOP;
+
+<html>
+<head>
+<title>X-Search Admin Page</title>
+</head>
+
+<body>
+<p>
+<h1>X-Search Admin Setup Page</h1>
+<blockquote>
+<p><B>Configuration file defined: $qconfig<br></B> 
+Note: The above configuration is the one defined within the X-Search
+script.<p>
+<br>
+<B>Below is a template for adding new search commands to X-Search. It is
+advisable that inexperienced users use the template in order to create the
+proper syntax to add to their configuration file.<p></B> 
+Summary:<br>
+<B>Engine Name:</B> Search engine name used by a WWW::Search backend.<br>
+<B>Search Name:</B> Nice name describing the search topic and used as a headline in
+your pages.<br>
+<B>Query:</B> Search words you are interested in tracking.<br>
+<B>Options:</B> Search options to pass to the backends. This is optional and can be
+left blank. <br>
+<B>Max:</B> Define how many results to return at once.<br>
+<B>qid:</B> The name of the folder/directory to store this search dated pages. Just a
+unique directory name, no paths. <p>
+</blockquote>
+
+<center>
+<form method="GET" action="">
+<input type="text" name="engine" size="12" value="Engine Name">
+<input type="text" name="search_name" size="12" value="Search Name">
+<input type="text" name="query" size="26" value="Query Search Words">
+<input type="text" name="options" size="11" value="Options">
+<input type="text" name="max" size="4" value="100" value="Max to Return">
+<input type="text" name="qid" size="11" value="qid"></form><br>
+Fill in the template below using the above sample structure:<br>
+
+<form method="GET" action="X-Search.pl">
+<input type="hidden" name="write_config" value="1">
+<center>
+<input type="text" name="engine" size="12">
+<input type="text" name="search_name" size="12">
+<input type="text" name="query" size="26">
+<input type="text" name="options" size="11">
+<input type="text" name="max" size="4" value="100">
+<input type="text" name="qid" size="11"></p>
+<center><p>
+<p><input type="submit" value="Add to Configuration File"> 
+</center>
+</form>
+</center>
+TOP
+
+# Display current configuration file to user
+
+if (-e $qconfig) {  # configuration file exists 
+
+open (FILE, $qconfig) ;
+@config = <FILE>;
+close (FILE);
+foreach $line (@config) {
+$tdata .= $1 if ($line =~ /^(\w.*)/i);
+$tdata = $tdata . "\n";
+} # dat lines
+}
+
+print <<BOTTOM;
+<p>
+<br>
+<hr>
+<B><h3>Current X-Search Configuration File Settings</B></h3>
+<blockquote>
+</center>
+Advance user's can directly edit the configuration file without using the
+above template below. Modify current search commands or add and remove entire 
+command lines. Click "Save Changes" to write the new changes to file. Note: If
+the below text area is blank, this means the configuration file does not yet
+exists and you should add search commands to create one from this form.
+<blockquote>
+
+<form method="POST" action="X-Search.pl">
+<textarea rows=9 name=urltext cols=80>$tdata</textarea>
+<input type="hidden" name="write_config" value="1">
+<p><input type="submit" value="Save Changes"></p>
+</form>
+<hr>
+<p>&nbsp;</p>
+<form method="POST" action="X-Search.pl">
+<p><input type="submit" value="Execute X-Search">
+&nbsp; Manually Execute X-Search to conduct a search run. If you have
+verbose "on" you will be presented with a page detailing the search results
+as well as a link to the index.html file after the script has stoped running.</p>
+</form>
+</body>
+</html>
+BOTTOM
+exit;
+
+}
+#########################################################
+sub read_config_file {
+
+  if (-e $qconfig) {  # configuration file exists 
+  
+  open (FILE, $qconfig) ;
+  @config = <FILE>;
+  close (FILE);
+  foreach $line (@config) {
+  $tdata .= $1 if ($line =~ /^(\w.*)/i);
+  $tdata = $tdata . "\n";
+  $tdata = '';
+  } # dat lines
+  } else {
+ print qq{
+<title>No Config File Found.</title>
+<BR>
+<BR>
+<CENTER><B><font color=red size=4>Configuration file not found.
+}
+  } 
+&print_admin;
+
+}
+
+########################################################
+sub write_config_file {
+
+$engine = $FORM{'engine'};
+$search_name = $FORM{'search_name'};
+$query = $FORM{'query'};
+$options = $FORM{'options'};
+$max = $FORM{'max'};
+$qid = $FORM{'qid'};
+$tdata = $FORM{'urltext'};
+
+if ($tdata) {
+   $tdata =~ s/\015//g; # remove ^M's 
+   open(UI, ">$qconfig") || die "Can't open $config_file: $!\n"; 
+   print UI "$tdata\n"; 
+   close(UI); 
+   print "<br><br><center><B>X-Search Configuration file been updated.</b>\n";
+&read_config_file;
+exit;
+}
+
+  if ($engine =~ /^\s+$/ || $search_name =~ /^$/) { ## Empty uid not allowed 
+  print "<br><br><center><B>Missing engine or search name!!</B>\n"; 
+  exit;
+  }
+  if ($query =~ /^\s+$/ || $qid=~ /^$/) { ## Empty uid not allowed 
+  print "<br><br><center><B>Missing query or qid.</B>\n"; 
+  exit;
+  }
+
+  open(UI, ">>$qconfig") || die "Can't open $qconfig $!\n"; 
+  print UI "$engine|$search_name|$query|$options|$max|$qid|\n"; 
+  close(UI); 
+  print "<br><br><center><B>X-Search Configuration file been updated.</b>\n"; 
+
+&read_config_file;
+}
+
+__END__
 
 =head1 NAME
 
@@ -443,6 +664,7 @@ X-Search -- Automated Web Searching and Search History Indexing
 
 =head1 SYNOPSIS
 
+use WWW::Search;
 I<X-Search [optional configuration file name/path argument]>
 
 Search commands are read from a configuration file.
@@ -478,12 +700,19 @@ field in the configuration file you could insert |groups=alt.some.group|
 or, if you wanted to search all groups related to perl you could do
 this: |groups=*perl*|
 
+I<X-Search> is ideal for web sites to present to their users detailed dated
+summaries of specific topics around the web that can change frequently. Thus,
+users are presented with the most current new additions as found in a pretty
+informative chronological order.
+
 I<X-Search> Allows the option of verifying the url address to determine if
 it is valid or not. Any url's that are found not valid, i.e., moved, not
 found, are ignored.
 
 I<X-Search> allows one with a lot of flexibility to use in all sorts of
 neat applications.
+
+(SEE =head1 REMOTE ADMINSTRATION for remote opertaion via web browser)
 
 =head1 CONFIGURATION FILE
 
@@ -493,7 +722,7 @@ configuration file to use and where.
 
 Method 1: Simply define $qconfig in the script to point to the
 configuration file. By default it looks for a file called "query.ini"
-located in same directory as X-Search. 
+located in same directory as X-Search which should be fine for most. 
 
 Method 2: Command line argument defining path and name of the
 configuration file. Example:
@@ -503,7 +732,6 @@ X-Search /home/xsearch/search.conf
 I<X-Search> would read /home/xsearch/search.conf for it's search commands.
 This allows easily using multi configuration files for different search
 setups.
-
 
 This file is read to get the following user defined search
 commands:
@@ -555,6 +783,53 @@ Note About Options
 Multiply option pairs must be seperated with '&'. See HotBot search
 example above.
 
+Using the Administration Form built into X-Search makes all the above
+much easier to manage remotely from a browser.
+
+=head1 REMOTE ADMINSTRATION
+
+I<X-Search> is capable of being run and configured remotely on a server via
+it's Administration form. This allows one to: a) remotely
+edit/add/remove search commands b) remotely execute X-Search manually in
+the event you do not have a need for or access to the cron function.
+
+To use on a remote server you of course will need WWW::Search installed
+and available on that server. Before uploading X-Search to your server
+you will need to set the path within the X-Search script as to where the
+index directory will be created and this should be the absolute path to
+your root directory. Example on a RedHat system you would enter
+"/home/httpd/html/index" (no trailing "/" slash) or some other directory
+name other than "index" if you prefer. Then you can just use
+http://myaddress.com/index to access your X-Search index.html page.
+
+You will need to chmod X-Search.pl to 755 as well as the cgi-bin
+directory itself to work properly under Unix once you have uploaded to
+your server. My cgi-bin directory was not 755 and it did not work right
+till I chmod it to 755.
+
+Win32 users can get away with doing nothing and X-Search would just by
+default build off the cgi-bin without any problems.
+
+If you followed all the above you can then enter admin mode by typing:
+
+http://myaddress.com/cgi-bin/X-Search.pl?admin=show
+
+You should then be presented with the X-Search Administration page.
+
+If you already have created a configuration file it will be displayed in
+the text area of the page, if not, it will be blank till you add some
+search commands. Creating search commands for X-Search is pretty easy in
+admin mode since I provide you with a template to fill out that will add
+the right syntax to the configuration file. More experienced users can
+use the text area to directly edit their configuration file. You can
+edit, add and remove pre-existing command lines this way remotely.
+
+At the bottom of the administration page is a button to run X-Search.
+This way you can remotely execute X-Search in a timely manner through
+your browser, say once a week. After the script is completed you can
+then navigate to the URL address of your X-Search index.html to view any
+new search additions.
+
 =head1 AUTO SEARCHING
 
 X-Search can be run from a cron job to automate searching even more.
@@ -599,12 +874,23 @@ can slow the search down depending on how many bad urls are encountered.
 
 =item $iDIR
 
-$iDIR = "$dir/index";  
+$iDIR = "index";  
 
-Define a sub-directory name that will store the main index.html file.
-The name "index" should be just fine. B<qid> directories will be created
-below this directory.
- 
+Define absolute path/name to store the main index.html file. The name
+"index" should be just fine. B<qid> directories will be created below
+this directory. 
+
+REMOTE SERVER CONSIDERATIONS
+
+Running remotely $iDIR should be pointed to the root directory, for
+example on RedHat you should define the path as:
+
+"/home/httpd/html/index" 
+
+In this way the url address to your index.html page would be
+http://myaddress.com/index/index.html Of course, "index" can be any name
+you desire for the directory.
+
 =item $print_summaries
 
 $print_summaries = "0";
@@ -648,6 +934,12 @@ build a index.html file. No need to mess with it.
 
 =head1 CHANGES
 
+Version 1.04
+
+ - Added remote administration so one can run X-Search or edit the
+   configuration file through their web browser. This allows one
+   to run X-Search as a CGI script on their server.
+
 Version 1.03
 
  - Created a hack to track Dejanews articles properly
@@ -657,12 +949,12 @@ Version 1.03
 
 =head1 AUTHOR
 
-X-Search was written entierly by Jim Smyser 
-E<jsmyser@bigfoot.com>.
+X-Search was written entierly by Jim Smyser E<lt><jsmyser@bigfoot.com><gt>.
 
 =head1 BUGS
 
-Shouldn't be any... but you never know! Report them to me.
+X-Search only been tested under RedHat and NT, it is unknown whether it
+will function under other OS's.
 
 =head1 COPYRIGHT
 
@@ -677,7 +969,4 @@ the author/developer.
 THIS SOFTWARE IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
 WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
 MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
-
-
-
 
